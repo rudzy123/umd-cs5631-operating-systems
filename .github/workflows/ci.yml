@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  asan-ubsan:
+    name: ASan + UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DOSLAB_SANITIZERS=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --timeout 20
+
+  valgrind:
+    name: Valgrind
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake valgrind
+      - name: Configure
+        run: cmake -S . -B build-valgrind -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build build-valgrind --parallel
+      - name: Memcheck
+        working-directory: build-valgrind
+        run: |
+          set -euo pipefail
+          opts=(
+            --error-exitcode=1
+            --leak-check=full
+            --show-leak-kinds=definite,indirect
+            --errors-for-leak-kinds=definite,indirect
+            --quiet
+          )
+          for bin in \
+            test_scheduler \
+            test_vm \
+            test_bounded_buffer \
+            test_fsutil \
+            test_deadlock \
+            process_demo \
+            thread_demo \
+            scheduler_demo \
+            deadlock_demo \
+            vm_demo
+          do
+            echo "== valgrind ${bin} =="
+            timeout 90 valgrind "${opts[@]}" "./${bin}"
+          done
+          echo "== valgrind fs_demo =="
+          timeout 30 valgrind "${opts[@]}" ./fs_demo stat /tmp
+
+  tsan:
+    name: TSan (nonblocking)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+      - name: Configure
+        run: cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DOSLAB_TSAN=ON
+      - name: Build
+        run: cmake --build build-tsan --parallel
+      - name: Test
+        run: ctest --test-dir build-tsan --output-on-failure --timeout 30
